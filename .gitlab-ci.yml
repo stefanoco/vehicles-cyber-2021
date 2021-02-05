@@ -1,0 +1,55 @@
+# PLEASE NOTE
+# This CI recipe will work provided that:
+# - a variable is set named GIT_REMOTE
+#   contaning the full path to the repository
+#   that I want to deploy to
+#   example: "git@github.com:username/projectname.git"
+# - (please note) in case of multiple destinations
+#   a set of multiple variables is required, example:
+#   GIT_REMOTE_GITHUB: "git@github.com:username/projectname.git"
+#   GIT_REMOTE_GITLAB: "git@gitlab.com:username/projectname.git"
+# - a variable is set named SSH_PRIVATE_KEY
+#   containing the private part of a key
+#   that enables SSH access to the repository
+# - CI pipelines preferences contain
+#   "git clone" instead of "git fetch" setting
+image: bluewind/git
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  GIT_SUBMODULE_NAME: remark-slides
+before_script:
+# prepare SSH accesso to remote
+  - mkdir -p ~/.ssh
+  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+  - chmod 600 ~/.ssh/id_rsa
+  # disable host key checking (NOTE: makes you susceptible to man-in-the-middle attacks)
+  # WARNING: use only in docker container, if you use it with shell you will overwrite your user's ssh config
+  - 'echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+  - chmod 400 ~/.ssh/config
+
+DeployGithub:
+  script:
+    # clean up (reserved files, notes in slides etc)
+    - git config --global user.email "git@bluewind.it"
+    - git config --global user.name "Git Automation"
+    # uncomment the following only in case the file exists
+    # - git rm IDEAS.md
+    - sed -i '/???/,/---/{//!d}' *.md
+    # clean up and include submodule
+    - git rm --cached $GIT_SUBMODULE_NAME
+    - git rm .gitmodules
+    - rm -rf $GIT_SUBMODULE_NAME/.git
+    # commit modifications
+    - git add .
+    - git commit -m "processed for external repo"
+    # fix detached HEAD
+    - git checkout -b temp
+    - git checkout -B master temp
+    # clean history up to last commit for external
+    - git branch clean_master $(echo "processed for external repo" | git commit-tree HEAD^{tree})
+    - git branch -m master dirty_master 
+    - git branch -m clean_master master
+    # push to remote
+    - git push -f $GIT_REMOTE_GITHUB master
+  tags:
+    - docker
